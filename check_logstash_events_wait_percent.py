@@ -17,16 +17,9 @@
 
 """
 
-Nagios Plugin to check a Logstash instance total number of config reloads
+Nagios Plugin to check a Logstash instance event idle time percentage
 
-Outputs total reloads since service startup to which optional thresholds
-can be set to alert on.
-
-When using --success it will output total succesful reloads and the optional
-thesholds will be applied to this metric only
-
-When using --failure it will output total failed reloads and the optional
-thesholds will be applied to this metric only
+Outputs the percentage of time logstash spent waiting for a worker to process an event.
 
 Ensure Logstash options:
   --http.host should be set to 0.0.0.0 if querying remotely
@@ -58,11 +51,11 @@ __author__ = 'MAXxATTAXx'
 __version__ = '0.1'
 
 
-class CheckLogstashConfigReloads(RestNagiosPlugin):
+class CheckLogstashEventsWaitPercent(RestNagiosPlugin):
 
     def __init__(self):
         # Python 2.x
-        super(CheckLogstashConfigReloads, self).__init__()
+        super(CheckLogstashEventsWaitPercent, self).__init__()
         # Python 3.x
         # super().__init__()
         self.name = 'Logstash'
@@ -70,40 +63,28 @@ class CheckLogstashConfigReloads(RestNagiosPlugin):
         # could add pipeline name to end of this endpoint but error would be less good 404 Not Found
         # Logstash 5.x /_node/pipeline <= use -5 switch for older Logstash
         # Logstash 6.x /_node/pipelines
-        self.path = '/_node/stats/reloads'
+        self.path = '/_node/stats/events'
         self.auth = False
         self.json = True
         self.msg = 'Logstash starts reloads msg not defined yet'
 
     def add_options(self):
-        super(CheckLogstashConfigReloads, self).add_options()
-        self.add_opt('--successes', action='store_true',
-                     help='Test successful reloads of config files' + \
-                          ' instead of the total')
-        self.add_opt('--failures', action='store_true',
-                     help='Test failed reloads of config files' + \
-                          ' instead of the total')
-        self.add_thresholds()
+        super(CheckLogstashEventsWaitPercent, self).add_options()
+        self.add_thresholds(default_warning=5, default_critical=10, percent=True)
 
     def process_options(self):
-        super(CheckLogstashConfigReloads, self).process_options()
-        self.validate_thresholds(optional=True)
+        super(CheckLogstashEventsWaitPercent, self).process_options()
+        self.validate_thresholds(percent=True, optional=True)
 
     def parse_json(self, json_data):
-        reloads = json_data['reloads']
-        successes = reloads['successes']
-        failures = reloads['failures']
-        total_reloads = successes + failures
-        self.msg = 'Logstash '
-        if self.get_opt('successes'):
-            self.msg = 'successful reloads = {}'.format(successes)
-            self.check_thresholds(successes)
-        elif self.get_opt('failures'):
-            self.msg = 'failed reloads = {}'.format(failures)
-            self.check_thresholds(failures)
-        else:
-            self.msg = 'total reloads = {}'.format(total_reloads)
-            self.check_thresholds(total_reloads)
+        events = json_data['events']
+        events_duration = events['duration_in_millis']
+        wait_percent = events['queue_push_duration_in_millis'] / events_duration if events_duration > 0 else 0
+        wait_percent *= 100
+        self.msg = 'Logstash event wait time percent = {0:.4f}%'.format(wait_percent)
+        self.check_thresholds(wait_percent)
+        self.msg += ' | event_wait_time_percent={0:.4f}%'.format(wait_percent)
+        self.msg += '{}'.format(self.get_perf_thresholds())
 
 if __name__ == '__main__':
-    CheckLogstashConfigReloads().main()
+    CheckLogstashEventsWaitPercent().main()

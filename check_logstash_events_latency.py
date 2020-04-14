@@ -17,16 +17,9 @@
 
 """
 
-Nagios Plugin to check a Logstash instance total number of config reloads
+Nagios Plugin to check a Logstash instance event parsing time in millisenconds
 
-Outputs total reloads since service startup to which optional thresholds
-can be set to alert on.
-
-When using --success it will output total succesful reloads and the optional
-thesholds will be applied to this metric only
-
-When using --failure it will output total failed reloads and the optional
-thesholds will be applied to this metric only
+Outputs the average parsing time in milliseconds for all events, from input to output.
 
 Ensure Logstash options:
   --http.host should be set to 0.0.0.0 if querying remotely
@@ -58,11 +51,11 @@ __author__ = 'MAXxATTAXx'
 __version__ = '0.1'
 
 
-class CheckLogstashConfigReloads(RestNagiosPlugin):
+class CheckLogstashEventsLatency(RestNagiosPlugin):
 
     def __init__(self):
         # Python 2.x
-        super(CheckLogstashConfigReloads, self).__init__()
+        super(CheckLogstashEventsLatency, self).__init__()
         # Python 3.x
         # super().__init__()
         self.name = 'Logstash'
@@ -70,40 +63,27 @@ class CheckLogstashConfigReloads(RestNagiosPlugin):
         # could add pipeline name to end of this endpoint but error would be less good 404 Not Found
         # Logstash 5.x /_node/pipeline <= use -5 switch for older Logstash
         # Logstash 6.x /_node/pipelines
-        self.path = '/_node/stats/reloads'
+        self.path = '/_node/stats/events'
         self.auth = False
         self.json = True
         self.msg = 'Logstash starts reloads msg not defined yet'
 
     def add_options(self):
-        super(CheckLogstashConfigReloads, self).add_options()
-        self.add_opt('--successes', action='store_true',
-                     help='Test successful reloads of config files' + \
-                          ' instead of the total')
-        self.add_opt('--failures', action='store_true',
-                     help='Test failed reloads of config files' + \
-                          ' instead of the total')
-        self.add_thresholds()
+        super(CheckLogstashEventsLatency, self).add_options()
+        self.add_thresholds(default_warning=75, default_critical=100)
 
     def process_options(self):
-        super(CheckLogstashConfigReloads, self).process_options()
-        self.validate_thresholds(optional=True)
+        super(CheckLogstashEventsLatency, self).process_options()
+        self.validate_thresholds(integer=False, optional=True)
 
     def parse_json(self, json_data):
-        reloads = json_data['reloads']
-        successes = reloads['successes']
-        failures = reloads['failures']
-        total_reloads = successes + failures
-        self.msg = 'Logstash '
-        if self.get_opt('successes'):
-            self.msg = 'successful reloads = {}'.format(successes)
-            self.check_thresholds(successes)
-        elif self.get_opt('failures'):
-            self.msg = 'failed reloads = {}'.format(failures)
-            self.check_thresholds(failures)
-        else:
-            self.msg = 'total reloads = {}'.format(total_reloads)
-            self.check_thresholds(total_reloads)
+        events = json_data['events']
+        out_events = events['out']
+        time_millis = events['duration_in_millis'] / out_events if out_events > 0 else 0
+        self.msg = 'Logstash avg parsing time = {0:.4f}ms'.format(time_millis)
+        self.check_thresholds(time_millis)
+        self.msg += ' | event_parsing_time={0:.4f}ms'.format(time_millis)
+        self.msg += '{}'.format(self.get_perf_thresholds())
 
 if __name__ == '__main__':
-    CheckLogstashConfigReloads().main()
+    CheckLogstashEventsLatency().main()
